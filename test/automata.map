@@ -1,0 +1,5 @@
+% automata.map
+3
+3 5 cc0.graph
+2 1 cc1.graph
+6 7 cc2.graph

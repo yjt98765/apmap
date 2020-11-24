@@ -12,7 +12,7 @@
 /*
 * Read a map file, which defines a full automaton
 */
-automata_t *ReadMapFile(FILE *fpin, int *ngraph, char ***gfname)
+automata_t *ReadMapFile(FILE *fpin, int *ngraph)
 {
   size_t lnlen = 1024;
   char *line = (char*)malloc(1024);
@@ -31,7 +31,6 @@ automata_t *ReadMapFile(FILE *fpin, int *ngraph, char ***gfname)
   if (nfields!=1 || *ngraph <= 0) 
     errexit("Wrong map file.\n");
 
-  *gfname = (char**)malloc(*ngraph * sizeof(char*));
   automata = (automata_t*)malloc(*ngraph * sizeof(automata_t));
 
   for (i=0; i<*ngraph; i++) {
@@ -53,9 +52,8 @@ automata_t *ReadMapFile(FILE *fpin, int *ngraph, char ***gfname)
     rlen -= nfields + 3;
 
     /* Copy the graph file name */
-    (*gfname)[i] = (char*)malloc(rlen + 1);
-    sscanf(line + nfields + 2, "%s", (*gfname)[i]);
-    automata[i].fname = i;
+    automata[i].fname = (char*)malloc(rlen + 1);
+    sscanf(line + nfields + 2, "%s", automata[i].fname);
   }
 
   return automata;

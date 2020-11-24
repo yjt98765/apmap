@@ -97,6 +97,9 @@ char ListChange(list_t *list, int origin, int current)
   return rst;
 }
 
+/*
+* Copy the values in src to dest
+*/
 void ListCopy(list_t *dest, list_t *src)
 {
   int i;
@@ -108,6 +111,7 @@ void ListCopy(list_t *dest, list_t *src)
   {
     dest->value[i] = src->value[i];
   }
+  dest->size = src->size;
 }
 
 /*
@@ -132,6 +136,21 @@ int SwapByPosValue(int *list, int size, int value, int pos)
 }
 
 /*
+* Print a list.
+*/
+void PrintList(list_t *list) {
+  int i;
+  if (list == NULL) {
+    return;
+  }
+  printf("[");
+  for (i=0; i<list->size; i++) {
+    printf("%d ", list->value[i]);
+  }
+  printf("]\n");
+}
+
+/*
 * Delete all the values in a list
 */
 void EmptyList(list_t *list)
@@ -147,5 +166,6 @@ void FreeList(list_t *list)
   if (list) {
     free(list->value);
     free(list);
+    list = NULL;
   }
 }

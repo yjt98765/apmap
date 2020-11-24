@@ -33,8 +33,10 @@ void ResetTile(tile_t *tile)
     tile->global[i][0] = -1;
     tile->global[i][1] = -1;
   }
-  for (i=0; i<8; i++) {
-    tile->g4[i] = -1;
+  if (tile->g4 != NULL) {
+    for (i=0; i<8; i++) {
+      tile->g4[i] = -1;
+    }
   }
   if (tile->ghost) {
     EmptyList(tile->ghost);
@@ -45,11 +47,12 @@ void ResetTile(tile_t *tile)
 /*
 * Tile initialization
 */
-void InitTile(tile_t *tile)
+void InitTile(tile_t *tile, char has_g4)
 {
   InitList(&tile->out, MAX_OUT);
   tile->ghost = NULL;
   tile->adjncy = NULL;
+  tile->g4 = has_g4? (int*)malloc(sizeof(int) * 8): NULL;
   ResetTile(tile);
 }
 
@@ -73,18 +76,17 @@ void MoveStateFields(tile_t *tile, int from, int to)
 /*
 * Resolve constraint conflicts
 */
-void ResolveConstraint(tile_t *tile, graph_t *graph, int *remain)
+void ResolveConstraint(tile_t *tile, graph_t *graph, char has_g4)
 {
   list_t **ext = graph->ext;
-  int index, cur, nadd, quotient, remainder;
-  int npart = graph->npart;
-  int cost = graph->cost;
-  list_t *nin = (list_t*)malloc(cost * sizeof(list_t));
+  int index, nadd, quotient, remainder;
+  list_t *nin = (list_t*)malloc(TILE_NUM * sizeof(list_t));
   int realj, start;
   int i, j, k;
+  int max_inout = has_g4? GLOBAL_NUM * 2 + 8: GLOBAL_NUM * 2;
 
-  for (i=0; i<cost; i++) {
-    InitList(&nin[i], MAX_IN);
+  for (i=0; i<TILE_NUM; i++) {
+    InitList(&nin[i], max_inout);
   }
 
   if (tile[0].nstate != 0) {
@@ -97,9 +99,11 @@ void ResolveConstraint(tile_t *tile, graph_t *graph, int *remain)
         }
       }
     }
-    for (i=0; i<8; i++) {
-      if (tile[0].g4[i] != -1) {
-        tile[0].g4[i] = -2;
+    if (tile[0].g4 != NULL) {
+      for (i=0; i<8; i++) {
+        if (tile[0].g4[i] != -1) {
+          tile[0].g4[i] = -2;
+        }
       }
     }
   }  
@@ -107,112 +111,120 @@ void ResolveConstraint(tile_t *tile, graph_t *graph, int *remain)
   for (i=0; i<graph->nvtxs; i++) {
     index = graph->where[i];
 
-    if (ext[i]) {
-      if (ext[i]->size > 0) {
-        ListAdd(&tile[index].out, i);
-        for (j=0; j<ext[i]->size; j++) {
-          ListAdd(&nin[ext[i]->value[j]], i);
-        }
+    if (ext[i] && ext[i]->size > 0) {
+      ListAdd(&tile[index].out, i);
+      for (j=0; j<ext[i]->size; j++) {
+        ListAdd(&nin[ext[i]->value[j]], i);
       }
     }
   }
 
   // deal with outgoing constraint conflict
-  cur = 0;
   start = (tile[0].nstate != 0)? 1: 0;
-  for (i=start; i<npart; i++) {
-    nadd = (tile[cur].out.size - 1) / MAX_OUT;
-    if (nadd <= 0)
-    {
-      cur++;
+  for (i=start; i<graph->npart; i++) {
+    nadd = (tile[i].out.size - 1) / max_inout;
+    if (nadd <= 0) {
       continue;
     }
+    printf("tile[%d] has %d output states. It is copied %d times\n", i, tile[i].out.size, nadd);
     
     InsertDuplicate(graph, i, nadd);
-    for (j=npart-1; j>i; j--)
-    {
-      realj = j+cur-i;
-      ListCopy(&tile[realj+nadd].out, &tile[realj].out);
-      ListCopy(&nin[realj+nadd], &nin[realj]);
+    for (j=graph->npart-1; j>i+nadd; j--) {
+      ListCopy(&tile[j].out, &tile[j-nadd].out);
+      ListCopy(&nin[j], &nin[j-nadd]);
+    }
+    for (j=i+nadd; j>i; j--) {
+      ListCopy(&nin[j], &nin[i]);
+      for (k=0; k<nin[i].size; k++) {
+        if (!ListAddNew(ext[nin[i].value[k]], j)) {
+          PrintList(ext[nin[i].value[k]]);
+          errexit("Tile %d is already in the destination of state %d!\n", j, nin[i].value[k]);
+        }
+      }
     }
 
-    printf("tile[%d] is copied %d times\n", cur, nadd);
-    quotient = tile[cur].out.size / (nadd + 1);
-    remainder = tile[cur].out.size % (nadd + 1);
+    quotient = tile[i].out.size / (nadd + 1);
+    remainder = tile[i].out.size % (nadd + 1);
     for (j=1; j<remainder; j++) {
-      realj = cur + j;
-      tile[realj].duplicated = cur;
+      realj = i + j;
+      tile[realj].duplicated = i;
 
       tile[realj].out.size = quotient + 1;
       for (k=0; k<tile[realj].out.size; k++) {
-        tile[realj].out.value[k] = tile[cur].out.value[tile[cur].out.size-1-k];
+        tile[realj].out.value[k] = tile[i].out.value[tile[i].out.size-1-k];
       }
-      tile[cur].out.size -= quotient + 1;
+      tile[i].out.size -= quotient + 1;
     }
     for (j=(remainder>0)? remainder: 1; j<=nadd; j++) {
-      realj = cur + j;
-      tile[realj].duplicated = cur;
+      realj = i + j;
+      tile[realj].duplicated = i;
 
       tile[realj].out.size = quotient;
       for (k=0; k<tile[realj].out.size; k++) {
-        tile[realj].out.value[k] = tile[cur].out.value[tile[cur].out.size-1-k];
+        tile[realj].out.value[k] = tile[i].out.value[tile[i].out.size-1-k];
       }
-      tile[cur].out.size -= quotient;
+      tile[i].out.size -= quotient;
     }
-    cur++;
+    i += nadd;
   }
 
   // deal with incoming constraint conflict
-  cur = 0;
-  for (i=start; i<npart; i++) {
-    nadd = (nin[cur].size - 1) / MAX_IN;
-    if (nadd <= 0)
-    {
-      cur++;
+  for (i=start; i<graph->npart; i++) {
+    nadd = (nin[i].size - 1) / max_inout;
+    if (nadd <= 0) {
       continue;
     }
 
-    tile[cur].ghost = CreateList(nadd);
+    tile[i].ghost = CreateList(nadd);
     InsertDuplicate(graph, i, nadd);
-    for (j=npart-1; j>i; j--) {
-      realj = j+cur-i;
-      ListCopy(&tile[realj+nadd].out, &tile[realj].out);
-      ListCopy(&nin[realj+nadd], &nin[realj]);
+    for (j=graph->npart-1; j>i+nadd; j--) {
+      if (tile[j - nadd].duplicated > i) {
+        tile[j].duplicated = tile[j-nadd].duplicated + nadd;
+      }
+      else {
+        tile[j].duplicated = tile[j-nadd].duplicated;
+      }
+      ListCopy(&tile[j].out, &tile[j-nadd].out);
+      ListCopy(&nin[j], &nin[j-nadd]);
+    }
+    for (j=i+nadd; j>i; j--) {
+      ListCopy(&tile[j].out, &tile[i].out);
     }
 
+    printf("Create %d ghost tiles for tile %d\n", nadd, i);
     quotient = nin[i].size / (nadd + 1);
     remainder = nin[i].size % (nadd + 1);
     for (j=1; j<remainder; j++) {
-      realj = cur + j;
-      tile[realj].duplicated = cur;
+      realj = i + j;
+      tile[realj].duplicated = i;
 
-      ListAdd(tile[cur].ghost, realj);
-      for (k=nin[cur].size-1; k>nin[cur].size-quotient-2; k--) {
-        if (!ListChange(ext[nin[cur].value[k]], cur, realj)) {
-          errexit("Tile %d is not destination of state %d!\n", cur, ext[nin[cur].value[k]]);
+      ListAdd(tile[i].ghost, realj);
+      for (k=nin[i].size-1; k>nin[i].size-quotient-2; k--) {
+        if (!ListChange(ext[nin[i].value[k]], i, realj)) {
+          PrintList(ext[nin[i].value[k]]);
+          errexit("Tile %d is not the destination of state %d!\n", i, nin[i].value[k]);
         }
       }
-      nin[cur].size -= quotient + 1;
+      nin[i].size -= quotient + 1;
     }
 
     for (j=(remainder>0)? remainder: 1; j<=nadd; j++) {
-      realj = cur + j;
-      tile[realj].duplicated = cur;
+      realj = i + j;
+      tile[realj].duplicated = i;
 
-      ListAdd(tile[cur].ghost, realj);
-      for (k=nin[cur].size-1; k>nin[cur].size-quotient-1; k--) {
-        if (!ListChange(ext[nin[cur].value[k]], cur, realj)) {
-          errexit("Tile %d is not destination of state %d!\n", cur, ext[nin[cur].value[k]]);
+      ListAdd(tile[i].ghost, realj);
+      for (k=nin[i].size-1; k>nin[i].size-quotient-1; k--) {
+        if (!ListChange(ext[nin[i].value[k]], i, realj)) {
+          PrintList(ext[nin[i].value[k]]);
+          errexit("Tile %d is not the destination of State %d!\n", i, nin[i].value[k]);
         }
       }
-      nin[cur].size -= quotient;
+      nin[i].size -= quotient;
     }
-
-    cur++;
-    printf("Tile %d has %d ghost tiles\n", cur, tile[cur].ghost->size);
+    i += nadd;
   }
 
-  for (i=0; i<cost; i++) {
+  for (i=0; i<TILE_NUM; i++) {
     free(nin[i].value);
   }
   free(nin);
@@ -225,7 +237,7 @@ void CopyGraphToTile(chip_t *chip, graph_t *graph, int fromtile)
 {
   tile_t *tile = chip->tile;
   global_t *global = chip->global;
-  g4_t *g4 = &chip->g4;
+  g4_t *g4 = chip->g4;
   int *gxadj = graph->xadj;
   int *gadjncy = graph->adjncy;
   int *pos = graph->pos;
@@ -236,6 +248,7 @@ void CopyGraphToTile(chip_t *chip, graph_t *graph, int fromtile)
   tile_t *tfirst = &tile[fromtile];
   char remain = 0;
   int start = fromtile;
+  int end = start;
 
   if (tfirst->nstate != 0) {
     remain = 1;
@@ -261,6 +274,9 @@ void CopyGraphToTile(chip_t *chip, graph_t *graph, int fromtile)
   /* Copy state numbers to tiles */
   for (i=0; i<graph->nvtxs; i++) {
     index = where[i] + fromtile;
+    if (index > end) {
+      end = index;
+    }
     where[i] = index;
     tile[index].state[tile[index].nstate++] = i;
   }
@@ -282,14 +298,16 @@ void CopyGraphToTile(chip_t *chip, graph_t *graph, int fromtile)
         }
       }
     }
-    for (j=0; j<8; j++) {
-      if (tfirst->g4[j] > -1) {
-        to = SwapByPosValue(state, TILE_SIZE, tile[fromtile].g4[j], 2 * GLOBAL_NUM + j);
-        MoveStateFields(tfirst, 2 * GLOBAL_NUM + j, to);
-        memcpy(&bitmap[to], &bitmap[2*GLOBAL_NUM+j], TILE_SIZE);
-        for (i=0; i<TILE_SIZE+MAX_IN; i++) {
-          bitmap[i][to] = bitmap[i][2*GLOBAL_NUM+j];
-          bitmap[i][2*GLOBAL_NUM+j] = 0;
+    if (tfirst->g4 != NULL) {
+      for (j=0; j<8; j++) {
+        if (tfirst->g4[j] > -1) {
+          to = SwapByPosValue(state, TILE_SIZE, tile[fromtile].g4[j], 2 * GLOBAL_NUM + j);
+          MoveStateFields(tfirst, 2 * GLOBAL_NUM + j, to);
+          memcpy(&bitmap[to], &bitmap[2*GLOBAL_NUM+j], TILE_SIZE);
+          for (i=0; i<TILE_SIZE+MAX_IN; i++) {
+            bitmap[i][to] = bitmap[i][2*GLOBAL_NUM+j];
+            bitmap[i][2*GLOBAL_NUM+j] = 0;
+          }
         }
       }
     }
@@ -328,14 +346,16 @@ void CopyGraphToTile(chip_t *chip, graph_t *graph, int fromtile)
         }
       }
     }
-    for (k=0; k<8; k++) {
-      gsrc = g4->src[fromtile][k];
-      if (gsrc > -1) {
-        ste = tile[gsrc / 8].g4[gsrc % 8];
-        for (l=gxadj[ste]; l<gxadj[ste+1]; l++) {
-          to = gadjncy[l];
-          if (where[to] == fromtile) {
-            bitmap[TILE_SIZE + GLOBAL_NUM * 2 + k][pos[to]] = 1;
+    if (g4 != NULL) {
+      for (k=0; k<8; k++) {
+        gsrc = g4->src[fromtile][k];
+        if (gsrc > -1) {
+          ste = tile[gsrc / 8].g4[gsrc % 8];
+          for (l=gxadj[ste]; l<gxadj[ste+1]; l++) {
+            to = gadjncy[l];
+            if (where[to] == fromtile) {
+              bitmap[TILE_SIZE + GLOBAL_NUM * 2 + k][pos[to]] = 1;
+            }
           }
         }
       }
@@ -366,7 +386,7 @@ void CopyGraphToTile(chip_t *chip, graph_t *graph, int fromtile)
     }
   }
 
-  for (i=start; i<fromtile + graph->cost; i++) {
+  for (i=start; i<=end; i++) {
     state = tile[i].state;
 
     /* duplicate a state as the result of constraint confilict resolving */
@@ -379,9 +399,16 @@ void CopyGraphToTile(chip_t *chip, graph_t *graph, int fromtile)
       }
     }
     if (tile[i].nstate<=0 || tile[i].nstate>TILE_SIZE) {
+      remain = graph->nvtxs;
       printf("nvtxs=%d\n", graph->nvtxs);
-      for (i=fromtile; i<fromtile + graph->cost; i++) {
-        printf("Tile[%d].nstate=%d\n", i, tile[i].nstate);
+      for (i=fromtile; i<=end; i++) {
+        remain -= tile[i].nstate;
+        printf("Tile[%d].nstate=%d ", i, tile[i].nstate);
+      }
+      printf("\n%d states are missing\n", remain);
+      printf("tile.out:");
+      for (i=fromtile; i<=end; i++) {
+        printf("%d ", tile[i].out.size);
       }
       exit(-1);
     }
@@ -397,12 +424,14 @@ void CopyGraphToTile(chip_t *chip, graph_t *graph, int fromtile)
         }
       }
     }
-    for (j=0; j<8; j++) {
-      if (tile[i].g4[j] == -1) {
-        break;
-      }
-      else {
-        SwapByPosValue(state, TILE_SIZE, tile[i].g4[j], 2 * GLOBAL_NUM + j);
+    if (tile[i].g4 != NULL) {
+      for (j=0; j<8; j++) {
+        if (tile[i].g4[j] == -1) {
+          break;
+        }
+        else {
+          SwapByPosValue(state, TILE_SIZE, tile[i].g4[j], 2 * GLOBAL_NUM + j);
+        }
       }
     }
 
@@ -424,12 +453,14 @@ void CopyGraphToTile(chip_t *chip, graph_t *graph, int fromtile)
         }
       }
     }
-    for (k=0; k<8; k++) {
-      index = TILE_SIZE + GLOBAL_NUM * 2 + k;
-      gsrc = g4->src[i][k];
-      if (gsrc != -1) {
-        ste = tile[gsrc / 8].g4[gsrc % 8];
-        nedge += gxadj[ste + 1] - gxadj[ste];
+    if (g4 != NULL) {
+      for (k=0; k<8; k++) {
+        index = TILE_SIZE + GLOBAL_NUM * 2 + k;
+        gsrc = g4->src[i][k];
+        if (gsrc != -1) {
+          ste = tile[gsrc / 8].g4[gsrc % 8];
+          nedge += gxadj[ste + 1] - gxadj[ste];
+        }
       }
     }
     if (nedge == 0) {
@@ -481,17 +512,19 @@ void CopyGraphToTile(chip_t *chip, graph_t *graph, int fromtile)
         }
       }
     }
-    for (k=0; k<8; k++) {
-      index = TILE_SIZE + GLOBAL_NUM * 2 + k;
-      txadj[index + 1] = txadj[index];
-      gsrc = g4->src[i][k];
-      if (gsrc != -1) {
-        ste = tile[gsrc / 8].g4[gsrc % 8];
-        for (l=gxadj[ste]; l<gxadj[ste+1]; l++) {
-          to = gadjncy[l];
-          curtile = (tile[i].duplicated==-1)? i: tile[i].duplicated;
-          if (where[to] == curtile) {
-            tadjncy[txadj[index+1]++] = pos[to];
+    if (g4 != NULL) {
+      for (k=0; k<8; k++) {
+        index = TILE_SIZE + GLOBAL_NUM * 2 + k;
+        txadj[index + 1] = txadj[index];
+        gsrc = g4->src[i][k];
+        if (gsrc != -1) {
+          ste = tile[gsrc / 8].g4[gsrc % 8];
+          for (l=gxadj[ste]; l<gxadj[ste+1]; l++) {
+            to = gadjncy[l];
+            curtile = (tile[i].duplicated==-1)? i: tile[i].duplicated;
+            if (where[to] == curtile) {
+              tadjncy[txadj[index+1]++] = pos[to];
+            }
           }
         }
       }
@@ -512,7 +545,6 @@ void CopySmallGraphToTile(tile_t *tile, graph_t *graph)
   int *state = tile->state;
   int *txadj = tile->xadj;
   int nvtxs = graph->nvtxs;
-//  int nedge = gxadj[nvtxs] + txadj[tile->nstate];
   int nedge = gxadj[nvtxs] + txadj[TILE_SIZE];
   int index = 0;
   int oldxadj = 0;
@@ -592,13 +624,15 @@ void EmitTile(tile_t *tile, FILE *fp)
       fprintf(fp, "\n");
     }
   }
-  for (i=0; i<8; i++) {
-    index = TILE_SIZE + 2 * GLOBAL_NUM + i;
-    fprintf(fp, "G4[%d]: ", i);
-    for (k=xadj[index]; k<xadj[index+1]; k++) {
-      fprintf(fp, " %d", adjncy[k]);
+  if (tile->g4 != NULL) {
+    for (i=0; i<8; i++) {
+      index = TILE_SIZE + 2 * GLOBAL_NUM + i;
+      fprintf(fp, "G4[%d]: ", i);
+      for (k=xadj[index]; k<xadj[index+1]; k++) {
+        fprintf(fp, " %d", adjncy[k]);
+      }
+      fprintf(fp, "\n");
     }
-    fprintf(fp, "\n");
   }
 
   /* Print the STEs and their corroponding part of the local switch */
@@ -628,6 +662,7 @@ void FreeTile(tile_t *tile)
   free(tile->out.value);
   FreeList(tile->ghost);
   free(tile->adjncy);
+  free(tile->g4);
   if (tile->duplicated != -1) {
     return;
   }

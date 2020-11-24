@@ -38,7 +38,7 @@ typedef struct {
 typedef struct {
   int nstate;
   int nedge;
-  int fname;
+  char *fname;
   char mapped;
 } automata_t;
 
@@ -46,8 +46,8 @@ typedef struct {
 * Represent a tile that consists of an STE array and a local switch
 */
 typedef struct {
-  int state[TILE_SIZE]; /* The Id of the states */
   int nstate;           /* Number of states */
+  int state[TILE_SIZE]; /* The Id of the states */
   int xadj[TILE_SIZE + MAX_IN + 1]; /* The pointer to adjncy array. 
                     xadj and adjncy together store the local graph */
   int *adjncy; /* This array contains the ending points of the transistions */
@@ -58,7 +58,7 @@ typedef struct {
   char start[TILE_SIZE];
   char report[TILE_SIZE];
   int global[GLOBAL_NUM][2];
-  int g4[8];
+  int *g4;
   list_t *ghost;
   char duplicated;
 } tile_t;
@@ -83,7 +83,7 @@ typedef struct {
 typedef struct {
   global_t global[GLOBAL_NUM]; /* Global switches (1 way) */
   tile_t tile[TILE_NUM];       /* Tiles */
-  g4_t g4;                     /* Global switches (4 ways) */
+  g4_t *g4;                    /* Global switches (4 ways) */
   int curtile; /* Id of the tile that is ready for mapping the next automata */
   int remain;  /* The number of STEs remaining unused in curtile */
 } chip_t;

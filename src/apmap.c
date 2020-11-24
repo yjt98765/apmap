@@ -27,33 +27,56 @@ int CompAutomata(const void *a, const void *b)
 int main(int argc, char *argv[])
 {
   FILE *fmap;
-  char **gfname;
   automata_t *automata;
   graph_t *graph, *ungraph;
-  int ngraph, maxedge;
+  int ngraph = 0, maxedge;
   chip_t *chip;
   int minauto, minautosize, candidate;
   char succeed;
   float ntile;
   int i, j, k;
+  automata_t **ats = (automata_t**)malloc(sizeof(automata_t*) * (argc - 1));
+  int *ngs = (int*)malloc(sizeof(int) * (argc - 1));
+  const char no_g4[] = "--no-g4";
+  int pre = 1;
 
   /* parse input file */
-  if (argc != 2) {
-    printf("usage: %s map_file\n", argv[0]);
+  if (argc < 2) {
+    printf("usage: %s [%s] map_file1 [map_file2] ...\n", argv[0], no_g4);
     exit(0);
   }
-  fmap = fopen(argv[1], "r");
-  if (!fmap) {
-    errexit("Cannot open file %s!\n", argv[1]);
+
+  if (argv[1][0] == '-') {
+    if (strcmp(argv[1], no_g4) != 0) {
+      printf("Ilegal argument: %s\n", argv[1]);
+      exit(0);
+    }
+    pre = 2;
   }
 
-  chip = (chip_t*)malloc(CHIP_NUM * sizeof(chip_t));
-  for (i=0; i<CHIP_NUM; i++) {
-    ChipInit(&chip[i]);
+  for (i=0; i<argc-pre; i++) {
+    fmap = fopen(argv[i + pre], "r");
+    if (!fmap) {
+      errexit("Cannot open file %s!\n", argv[i + pre]);
+    }
+
+    ats[i] = ReadMapFile(fmap, &ngs[i]);
+    ngraph += ngs[i];
+    fclose(fmap);
   }
 
-  automata = ReadMapFile(fmap, &ngraph, &gfname);
-  fclose(fmap);
+  /* Merge all inputs together */
+  automata = (automata_t*)malloc(sizeof(automata_t) * ngraph);
+  k = 0;
+  for (i=0; i<argc-1; i++) {
+    for (j=0; j<ngs[i]; j++) {
+      automata[k++] = ats[i][j];
+    }
+  }
+  free(ats);
+  free(ngs);
+
+  /* Sort the automata */
   qsort(automata, ngraph, sizeof(automata_t), CompAutomata);
   minauto = ngraph-1;
   minautosize = automata[minauto].nstate;
@@ -66,13 +89,18 @@ int main(int argc, char *argv[])
   graph = CreateGraph(automata[0].nstate, maxedge, 1);
   ungraph = CreateGraph(automata[0].nstate, maxedge * 2, 0);
 
+  chip = (chip_t*)malloc(CHIP_NUM * sizeof(chip_t));
+  for (i=0; i<CHIP_NUM; i++) {
+    ChipInit(&chip[i], pre == 1);
+  }
+
   for (i=0; i<ngraph; i++) {
     if (automata[i].mapped) {
       continue;
     }
 
     /* read graph */
-    ReadGraphFile(graph, gfname[automata[i].fname], automata[i].nstate, automata[i].nedge);
+    ReadGraphFile(graph, automata[i].fname, automata[i].nstate, automata[i].nedge);
 
     for (k=0; k<CHIP_NUM; k++) {
       fflush(stdout);
@@ -82,7 +110,7 @@ int main(int argc, char *argv[])
       }
     }
     if (succeed != 1) {
-      errexit("%s cannot be mapped!\n", gfname[automata[i].fname]);
+      errexit("%s cannot be mapped!\n", automata[i].fname);
     }
 
     automata[i].mapped = 1;
@@ -97,7 +125,7 @@ int main(int argc, char *argv[])
           candidate = j;
         }
       }
-      ReadGraphFile(graph, gfname[automata[candidate].fname],
+      ReadGraphFile(graph, automata[candidate].fname,
                     automata[candidate].nstate, automata[candidate].nedge);
       MapGraphToChip(&chip[k], graph, graph);
       automata[candidate].mapped = 1;
@@ -156,9 +184,8 @@ int main(int argc, char *argv[])
   FreeGraph(&graph, automata[0].nstate);
   FreeGraph(&ungraph, automata[0].nstate);
   for (i=0; i<ngraph; i++) {
-    free(gfname[i]);
+    free(automata[i].fname);
   }
-  free(gfname);
   free(automata);
   for (i=0; i<CHIP_NUM; i++) {
     FreeChip(&chip[i]);

@@ -214,6 +214,9 @@ void CountBoundaryNodes(graph_t* graph, int *nin, int *nout)
   }
 }
 
+/*
+* Adjust *graph->ext* and *graph->where* as if the *pos* part is duplicated for *num* times
+*/
 void InsertDuplicate(graph_t *graph, int pos, int num)
 {
   list_t **ext = graph->ext;
@@ -224,10 +227,13 @@ void InsertDuplicate(graph_t *graph, int pos, int num)
     if (where[i] > pos) {
       where[i] += num;
     }
-    for (j=0; j<ext[i]->size; j++) {
-      if (ext[i]->value[j] > pos) {
-        ext[i]->value[j] += num;
+    if (ext[i]) {
+      for (j=0; j<ext[i]->size; j++) {
+        if (ext[i]->value[j] > pos) {
+          ext[i]->value[j] += num;
+        }
       }
     }
-  }  
+  }
+  graph->npart += num; 
 }

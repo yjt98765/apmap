@@ -62,7 +62,7 @@ char MapStateToG4(g4_t *g4, list_t *ext, int src, int curtile)
   /* detect */
   for (i=0; i<ext->size; i++) {
     dest = ext->value[i] + curtile;
-    if (g4->src[dest][3] != -1) {
+    if (g4->src[dest][7] != -1) {
       return 0;
     }
   }
@@ -83,9 +83,12 @@ char MapStateToG4(g4_t *g4, list_t *ext, int src, int curtile)
 /* 
 * Config global switches according to the tiles 
 */
-char MapGlobal(global_t global[GLOBAL_NUM], g4_t *g4, graph_t *graph, tile_t tile[TILE_NUM], int *curtile)
+char MapGlobal(chip_t *chip, graph_t *graph, int *curtile)
 {
   int npart = graph->npart;
+  global_t *global = chip->global;
+  g4_t *g4 = chip->g4;
+  tile_t *tile = chip->tile;
   list_t *ext;
   int state;
   char mapped;
@@ -99,9 +102,11 @@ char MapGlobal(global_t global[GLOBAL_NUM], g4_t *g4, graph_t *graph, tile_t til
         }
       }
     }
-    for (k=0; k<8; k++) {
-      if (g4->src[*curtile][k] != -1) {
-        g4->src[*curtile][k] = -2;
+    if (g4 != NULL) {
+      for (k=0; k<8; k++) {
+        if (g4->src[*curtile][k] != -1) {
+          g4->src[*curtile][k] = -2;
+        }
       }
     }
   }
@@ -127,7 +132,7 @@ char MapGlobal(global_t global[GLOBAL_NUM], g4_t *g4, graph_t *graph, tile_t til
           }
         }
       }
-      if (!mapped) {
+      if (!mapped && g4 != NULL) {
         for (k=0; k<8; k++) {
           if (tile[i].g4[k] == -1) {
             mapped = MapStateToG4(g4, ext, 8*i+k, *curtile);

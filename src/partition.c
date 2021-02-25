@@ -23,6 +23,9 @@ void SetPartSizeTarget(float *tpwgts, int npart, int minsize)
   tpwgts[npart-1] = (float)minsize / total;
 }
 
+/*
+* Decide the portion of parts according to headsize and tailsize
+*/
 void SetPartSize(float *tpwgts, int npart, int headsize, int tailsize)
 {
   int total = (npart - 2) * TILE_SIZE + headsize + tailsize;
@@ -123,9 +126,6 @@ char MetisWrapper(graph_t *graph, float *tpwgts, int headsize, int *part)
   for (i=0; i<npart; i++) {
     max = (size[i]>max)? size[i]: max;
   }
-  if (size[npart-1] == 0) {
-    graph->npart--;
-  }
 
   if (size[0] > headsize) {
     result = -1;
@@ -143,138 +143,66 @@ char MetisWrapper(graph_t *graph, float *tpwgts, int headsize, int *part)
 /*
 * Partition a given graph
 */
-char PartitionGraph(graph_t *ungraph, graph_t *graph, int headsize, list_t *choice, char has_g4)
+char PartitionGraph(graph_t *ungraph, graph_t *graph, int headsize, list_t *choice, int has_g4, int no_opt)
 {
   int nvtxs = graph->nvtxs;
   int *nin = (int*)malloc(TILE_NUM * sizeof(int));
   int *nout = (int*)malloc(TILE_NUM * sizeof(int));
-  float *tpwgts;
+  float *tpwgts = (float*)malloc(TILE_NUM * sizeof(float));
   int cost, initcost, mincost, minpart, tailsize, mintail;
-  char valid = 0;
-  int i, j, k;
-
-  int *xadj = graph->xadj;
-  int *uxadj = ungraph->xadj;
-  int *adjncy = graph->adjncy;
-  int *where = graph->where;
-  char *report = graph->report;
-  int *fromi, *state;
-  int cur, curstate, ninper;
-  list_t **from, *out, *stack, *lfrom;
-  char *visited, use;
+  int valid = 0;
 
   EmptyList(choice);
-  ungraph->npart = nvtxs / TILE_SIZE;
-  while (valid != 1) {
-    ungraph->npart++;
-    valid = MetisWrapper(ungraph, NULL, TILE_SIZE, graph->where);
-  };
-
-  graph->npart = ungraph->npart;
-  CountBoundaryNodes(graph, nin, nout);
-  initcost = CalcBoundaryOverhead(nin, nout, ungraph->npart, has_g4);
-  mincost = graph->npart + initcost;
-  minpart = graph->npart;
-  ListAdd(choice, ungraph->npart);
-  ListAdd(choice, TILE_SIZE);
-  for (i=0; i<initcost; i++) {
-    ungraph->npart++;
-    valid = MetisWrapper(ungraph, NULL, TILE_SIZE, graph->where);
-    if (valid == 1) {
-      graph->npart = ungraph->npart;
-      CountBoundaryNodes(graph, nin, nout);
-      cost = CalcBoundaryOverhead(nin, nout, ungraph->npart, has_g4) + graph->npart;
-      if (cost < mincost) {
-        mincost = cost;
-        minpart = graph->npart;
-        ListAdd(choice, minpart);
-        ListAdd(choice, TILE_SIZE);
+  ungraph->npart = (nvtxs - headsize - 1) / TILE_SIZE + 2;
+  tailsize = (nvtxs - headsize - 1) % TILE_SIZE;
+  mincost = TILE_NUM + 1;
+  while (ungraph->npart <= mincost && (!no_opt || valid != 1)) {
+    /* Increase the tailsize in each try */
+    tailsize += 1;
+    if (tailsize > TILE_SIZE) {
+      tailsize -= TILE_SIZE;
+      ungraph->npart++;
+      if (ungraph->npart > TILE_NUM) {
+        errexit("Cannot partition graph with %d states\n", nvtxs);
       }
     }
-  }
 
-  tpwgts = (float*)malloc((minpart+1) * sizeof(float));
-  tailsize = nvtxs - (minpart - 1) * TILE_SIZE;
-  tailsize = (tailsize<=0)? minpart/2: tailsize;
-  mintail = TILE_SIZE;
-
-  while (tailsize < TILE_SIZE) {
-    ungraph->npart = minpart;
-    SetPartSizeTarget(tpwgts, minpart, tailsize);
-    valid = MetisWrapper(ungraph, tpwgts, TILE_SIZE, graph->where);
-    if (valid == 1) {
-      graph->npart = ungraph->npart;
-      CountBoundaryNodes(graph, nin, nout);
-      cost = CalcBoundaryOverhead(nin, nout, ungraph->npart, has_g4) + ungraph->npart;
-      if (cost <= mincost) {
-        mincost = cost;
-        mintail = tailsize;
-        ListAdd(choice, minpart);
-        ListAdd(choice, tailsize);
-        break;
-      }
-    }
-    tailsize += minpart;
-  }
-
-  if (headsize >= TILE_SIZE) {
-    tailsize = ListPop(choice);
-    ungraph->npart = ListPop(choice);
-    SetPartSizeTarget(tpwgts, ungraph->npart, tailsize);
-    assert(MetisWrapper(ungraph, tpwgts, TILE_SIZE, graph->where)==1);
-    graph->npart = ungraph->npart;
-    CountBoundaryNodes(graph, nin, nout);
-    graph->cost = CalcBoundaryOverhead(nin+1, nout+1, ungraph->npart-1, has_g4) + ungraph->npart;
-    free(nin);
-    free(nout);
-    free(tpwgts);
-    return 1;
-  }
-
-  //considering the remainning part
-  if (mincost < minpart) {
-    tailsize = TILE_SIZE - headsize;
-  }
-  else {
-    tailsize = mintail - headsize;
-    if (tailsize <= 0) {
-      tailsize += TILE_SIZE;
-    }
-    else {
-      minpart++;
-    }
-  }
-  valid = 0;
-  while (valid != 1) {
-    tailsize += minpart;
-    if (tailsize >= TILE_SIZE) {
-      tailsize = ListPop(choice);
-      ungraph->npart = ListPop(choice);
-      graph->cost = mincost;
-      SetPartSizeTarget(tpwgts, ungraph->npart, tailsize);
-      assert(MetisWrapper(ungraph, tpwgts, TILE_SIZE, graph->where)==1);
-      use = 0;
-      break;
-    }
-    
-    ungraph->npart = minpart;
-    SetPartSize(tpwgts, minpart, headsize, tailsize);
+    SetPartSize(tpwgts, ungraph->npart, headsize, tailsize);
     valid = MetisWrapper(ungraph, tpwgts, headsize, graph->where);
-    if (valid == -1) {
-      headsize -= minpart;
+    if (valid == 1) {
+      graph->cost = graph->npart = ungraph->npart;
+      CountBoundaryNodes(graph, nin, nout);
+      cost = CalcBoundaryOverhead(nin, nout, ungraph->npart, has_g4);
+      valid = cost + 1;
+      if (!no_opt && ungraph->npart + cost < mincost) {
+        if (minpart < TILE_NUM) {
+          ListAdd(choice, minpart);
+          ListAdd(choice, mintail);
+        }
+        minpart = ungraph->npart;
+        mincost = minpart + cost;
+        mintail = tailsize;
+      }
+      else if (ungraph->npart+cost == mincost) {
+        ListAdd(choice, ungraph->npart);
+        ListAdd(choice, tailsize);
+      }
     }
   }
 
-  graph->npart = ungraph->npart;
-  if (valid == 1) {
-    use = 1;
+  /* Make sure the result is optimal */
+  if (!no_opt && (ungraph->npart!=minpart || tailsize!=mintail)) {
+    SetPartSize(tpwgts, minpart, headsize, mintail);
+    ungraph->npart = minpart;
+    MetisWrapper(ungraph, tpwgts, headsize, graph->where);
+    graph->npart = minpart;
+    graph->cost = mincost;
     CountBoundaryNodes(graph, nin, nout);
-    graph->cost = CalcBoundaryOverhead(nin+1, nout+1, ungraph->npart-1, has_g4) + ungraph->npart;
   }
   free(nin);
   free(nout);
   free(tpwgts);
-  return use;
+  return 1;
 }
 
 /*
@@ -285,10 +213,8 @@ void RePartitionGraph(graph_t *ungraph, graph_t *graph, list_t *choice, char has
   int tail = ListPop(choice);
   int npart = ListPop(choice);
   float *tpwgts = NULL;
-
   int *nin = (int*)malloc(TILE_NUM * sizeof(int));
   int *nout = (int*)malloc(TILE_NUM * sizeof(int));
-  int i;
 
   ungraph->npart = npart;
   if (tail < TILE_SIZE) {

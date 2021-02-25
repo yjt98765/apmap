@@ -12,6 +12,7 @@
 #include <string.h>
 #include <math.h>
 #include <assert.h>
+#include <getopt.h>
 
 #include "metis.h"
 #include "def.h"

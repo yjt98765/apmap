@@ -24,10 +24,18 @@ int CompAutomata(const void *a, const void *b)
   }
 }
 
+void PrintHelp(const char* filename)
+{
+  printf("usage: %s [options] map_file1 [map_file2] ...\n", filename);
+  printf("Options:\n");
+  printf("\t-h or --help:\tprint this usage information.\n");
+  printf("\t--no-g4:\texclude the 4-way global switch from the routing matrix.\n");
+  printf("\t--no-opt:\tdisable constraint conflict resolving optimizations.\n");
+}
+
 int main(int argc, char *argv[])
 {
-  FILE *fmap;
-  automata_t *automata;
+  automata_t *automata; /* The array of input automata */
   graph_t *graph, *ungraph;
   int ngraph = 0, maxedge;
   chip_t *chip;
@@ -35,29 +43,52 @@ int main(int argc, char *argv[])
   char succeed;
   float ntile;
   int i, j, k;
-  automata_t **ats = (automata_t**)malloc(sizeof(automata_t*) * (argc - 1));
-  int *ngs = (int*)malloc(sizeof(int) * (argc - 1));
-  const char no_g4[] = "--no-g4";
-  int pre = 1;
 
-  /* parse input file */
-  if (argc < 2) {
-    printf("usage: %s [%s] map_file1 [map_file2] ...\n", argv[0], no_g4);
-    exit(0);
-  }
+  /* Variables for file reading */
+  FILE *fmap;
+  automata_t **ats = (automata_t**)malloc(sizeof(automata_t*) * argc);
+  int *ngs = (int*)malloc(sizeof(int) * argc);
 
-  if (argv[1][0] == '-') {
-    if (strcmp(argv[1], no_g4) != 0) {
-      printf("Ilegal argument: %s\n", argv[1]);
-      exit(0);
+  /* Variables for parsing the command-line */
+  static int has_g4 = 1;
+  static int no_opt = 0;
+  static struct option long_options[] = {
+    {"no-g4", no_argument,       &has_g4, 0},
+    {"no-opt",   no_argument,       &no_opt, 1},
+    {"help", no_argument, 0, 'h'},
+    {0, 0, 0, 0}
+  };
+  int c;
+  int option_index = 0;
+
+  /* Parse input file */
+  while (1) {
+    c = getopt_long (argc, argv, "h", long_options, &option_index);
+    if (c == -1)
+      break;
+    switch (c) {
+      case 0: /* If this option set a flag, do nothing else now. */
+          break;
+      case 'h':
+        PrintHelp(argv[0]);
+        return 0;
+      case '?':
+        PrintHelp(argv[0]);
+        return 1;
+      default:
+        abort();
     }
-    pre = 2;
   }
 
-  for (i=0; i<argc-pre; i++) {
-    fmap = fopen(argv[i + pre], "r");
+  if (optind == argc) {
+    errexit("Please specify at least a map file.\n");
+  }
+
+  /* After calling getopt_long, the map files are arranged to the last of argv */
+  for (i=optind; i<argc; i++) {
+    fmap = fopen(argv[i], "r");
     if (!fmap) {
-      errexit("Cannot open file %s!\n", argv[i + pre]);
+      errexit("Cannot open file %s!\n", argv[i]);
     }
 
     ats[i] = ReadMapFile(fmap, &ngs[i]);
@@ -68,7 +99,7 @@ int main(int argc, char *argv[])
   /* Merge all inputs together */
   automata = (automata_t*)malloc(sizeof(automata_t) * ngraph);
   k = 0;
-  for (i=0; i<argc-1; i++) {
+  for (i=optind; i<argc; i++) {
     for (j=0; j<ngs[i]; j++) {
       automata[k++] = ats[i][j];
     }
@@ -91,7 +122,7 @@ int main(int argc, char *argv[])
 
   chip = (chip_t*)malloc(CHIP_NUM * sizeof(chip_t));
   for (i=0; i<CHIP_NUM; i++) {
-    ChipInit(&chip[i], pre == 1);
+    ChipInit(&chip[i], has_g4);
   }
 
   for (i=0; i<ngraph; i++) {
@@ -99,12 +130,11 @@ int main(int argc, char *argv[])
       continue;
     }
 
-    /* read graph */
+    /* Read graph */
     ReadGraphFile(graph, automata[i].fname, automata[i].nstate, automata[i].nedge);
 
     for (k=0; k<CHIP_NUM; k++) {
-      fflush(stdout);
-      succeed = MapGraphToChip(&chip[k], graph, ungraph);
+      succeed = MapGraphToChip(&chip[k], graph, ungraph, no_opt);
       if (succeed == 1) {
         break;
       }
@@ -118,7 +148,7 @@ int main(int argc, char *argv[])
       break;
     }
 	
-    /* fill the remaining part of a tile with small graphs */
+    /* Fill the remaining part of a tile with small graphs */
     while (chip[k].remain >= minautosize) {
       for (j=minauto; (automata[j].nstate<=chip[k].remain) && (j>0); j--) {
         if (!automata[j].mapped) {
@@ -127,7 +157,7 @@ int main(int argc, char *argv[])
       }
       ReadGraphFile(graph, automata[candidate].fname,
                     automata[candidate].nstate, automata[candidate].nedge);
-      MapGraphToChip(&chip[k], graph, graph);
+      MapGraphToChip(&chip[k], graph, graph, no_opt);
       automata[candidate].mapped = 1;
       fflush(stdout);
 

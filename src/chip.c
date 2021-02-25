@@ -75,10 +75,10 @@ char MapLargeGraph(chip_t *chip, graph_t *graph, char use)
   }
 
   ResolveConstraint(&chip->tile[curtile], graph, chip->g4 != NULL);
-  if (MapGlobal(chip, graph, &curtile)) {
+  if (MapGlobal(chip, graph, &curtile) == 1) {
     CopyGraphToTile(chip, graph, oldtile);
   }
-  else { /* roll back */
+  else { /* Roll back */
     graph->npart = oldnpart;
     CopyGlobal(chip->global, gback);
     if (chip->g4 != NULL) {
@@ -95,7 +95,7 @@ char MapLargeGraph(chip_t *chip, graph_t *graph, char use)
   return 1;
 }
 
-char MapGraphToChip(chip_t *chip, graph_t *graph, graph_t *ungraph)
+char MapGraphToChip(chip_t *chip, graph_t *graph, graph_t *ungraph, int no_opt)
 {
   list_t parchoice;
   char succeed;
@@ -130,12 +130,15 @@ char MapGraphToChip(chip_t *chip, graph_t *graph, graph_t *ungraph)
   GetUndiGraph(graph, ungraph);
 
   /* Partition the graph */
-  use = PartitionGraph(ungraph, graph, chip->remain, &parchoice, chip->g4 != NULL);
+  use = PartitionGraph(ungraph, graph, chip->remain, &parchoice, chip->g4 != NULL, no_opt);
 
   succeed = MapLargeGraph(chip, graph, use);
+  /* If failed, give up the remaining part on the current tile and start with a fresh tile. */
   if (succeed!=1 && chip->remain!=TILE_SIZE) {
     chip->curtile++;
     chip->remain = TILE_SIZE;
+    use = PartitionGraph(ungraph, graph, chip->remain, &parchoice, chip->g4 != NULL, no_opt);
+    succeed = MapLargeGraph(chip, graph, use);
   }
   while (parchoice.size>0 && succeed!=1) {
     RePartitionGraph(ungraph, graph, &parchoice, chip->g4 != NULL);
@@ -160,7 +163,9 @@ void EmitChip(chip_t *chip, FILE* fp)
 
   if (curtile > 0) {
     EmitGlobal(chip->global, chip->tile, fp);
-    EmitG4(chip->g4, chip->tile, fp);
+    if (chip->g4 != NULL) {
+      EmitG4(chip->g4, chip->tile, fp);
+    }
   }
 
   for (i=0; i<curtile; i++) {
@@ -186,4 +191,3 @@ void FreeChip(chip_t *chip)
   }
   free(chip->g4);
 }
-

@@ -400,14 +400,13 @@ void CopyGraphToTile(chip_t *chip, graph_t *graph, int fromtile)
     }
     if (tile[i].nstate<=0 || tile[i].nstate>TILE_SIZE) {
       remain = graph->nvtxs;
-      printf("nvtxs=%d\n", graph->nvtxs);
-      for (i=fromtile; i<=end; i++) {
+      for (i=start; i<=end; i++) {
         remain -= tile[i].nstate;
-        printf("Tile[%d].nstate=%d ", i, tile[i].nstate);
+        printf("Tile[%d].nstate=%d src=%d ", i, tile[i].nstate, tile[i].duplicated);
       }
       printf("\n%d states are missing\n", remain);
       printf("tile.out:");
-      for (i=fromtile; i<=end; i++) {
+      for (i=start; i<=end; i++) {
         printf("%d ", tile[i].out.size);
       }
       exit(-1);

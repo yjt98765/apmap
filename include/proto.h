@@ -11,7 +11,7 @@
 
 /* chip.c */
 void ChipInit(chip_t *chip, char has_g4);
-char MapGraphToChip(chip_t *chip, graph_t *graph, graph_t *ungraph);
+char MapGraphToChip(chip_t *chip, graph_t *graph, graph_t *ungraph, int no_opt);
 void EmitChip(chip_t *chip, FILE* fp);
 void FreeChip(chip_t *chip);
 
@@ -51,7 +51,7 @@ void FreeList(list_t *list);
 void SetPartSizeTarget(float *tpwgts, int npart, int minsize);
 int CalcBoundaryOverhead(int *nin, int *nout, int npart, char has_g4);
 void WritePartitionToFile(const char* fname, int *part, int n);
-char PartitionGraph(graph_t *ungraph, graph_t *graph, int remain, list_t *choice, char has_g4);
+char PartitionGraph(graph_t *ungraph, graph_t *graph, int remain, list_t *choice, int has_g4, int no_opt);
 void RePartitionGraph(graph_t *ungraph, graph_t *graph, list_t *choice, char has_g4);
 
 /* tile.c */
